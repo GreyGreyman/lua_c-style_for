@@ -1353,6 +1353,34 @@ static void forlist (LexState *ls, TString *indexname) {
 }
 
 
+static void readexpr (LexState *ls){
+  while (ls->t.token != ';' && ls->t.token != ')')
+    statement(ls);
+  luaX_next(ls); //skip ';' or ')'
+}
+
+
+static void cforstat (LexState *ls, int line) {
+  /* cforstat -> FOR (init; cond; iterate) DO block END */
+  FuncState *fs = ls->fs;
+  int forinit;
+  int condexit;
+  BlockCnt bl;
+  luaX_next(ls);
+  readexpr(ls);
+  forinit = luaK_getlabel(fs);
+  condexit = cond(ls);
+  checknext(ls,';');
+  readexpr(ls);
+  enterblock(fs, &bl, 1);
+  checknext(ls, TK_DO);
+  block(ls);
+  luaK_jumpto(fs, forinit);
+  leaveblock(fs);
+  luaK_patchtohere(fs, condexit);  /* false conditions finish the loop */
+}
+
+
 static void forstat (LexState *ls, int line) {
   /* forstat -> FOR (fornum | forlist) END */
   FuncState *fs = ls->fs;
@@ -1360,14 +1388,18 @@ static void forstat (LexState *ls, int line) {
   BlockCnt bl;
   enterblock(fs, &bl, 1);  /* scope for loop and control variables */
   luaX_next(ls);  /* skip `for' */
-  varname = str_checkname(ls);  /* first variable name */
-  switch (ls->t.token) {
-    case '=': fornum(ls, varname, line); break;
-    case ',': case TK_IN: forlist(ls, varname); break;
-    default: luaX_syntaxerror(ls, LUA_QL("=") " or " LUA_QL("in") " expected");
+  if(ls->t.token == '(')
+        cforstat(ls, line);
+  else{
+      varname = str_checkname(ls);  /* first variable name */
+      switch (ls->t.token) {
+        case '=': fornum(ls, varname, line); break;
+        case ',': case TK_IN: forlist(ls, varname); break;
+        default: luaX_syntaxerror(ls, LUA_QL("=") " or " LUA_QL("in") " expected");
+      }
   }
   check_match(ls, TK_END, TK_FOR, line);
-  leaveblock(fs);  /* loop scope (`break' jumps to this point) */
+  leaveblock(fs); /* loop scope (`break' jumps to this point) */
 }
 
 
